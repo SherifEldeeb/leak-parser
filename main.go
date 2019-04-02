@@ -13,9 +13,7 @@ import (
 	"regexp"
 	"sync"
 	"time"
-
-	"net/http"
-	_ "net/http/pprof"
+	//_ "net/http/pprof"
 )
 
 type record struct {
@@ -26,8 +24,9 @@ type record struct {
 }
 
 var (
-	files  = flag.String("files", "", "Leak Filename")
-	pretty = flag.Bool("pretty", false, "Pretty Print?")
+	files     = flag.String("files", "", "Leak Filename")
+	errorFile = flag.String("errorf", "errors.txt", "Errors Filename")
+	pretty    = flag.Bool("pretty", false, "Pretty Print?")
 	// es     = flag.String("es", "http://127.0.0.1:9200", "ES Server")
 	rcount   = flag.Int("rcount", 128, "Count of processing goroutines")
 	ocount   = flag.Int("ocount", 8, "Count of out connections")
@@ -49,9 +48,17 @@ var errorCounter = 0
 
 var wg = &sync.WaitGroup{}
 var wgNet = &sync.WaitGroup{}
+var ef *os.File
+var err error
 
 func main() {
-	go http.ListenAndServe("127.0.0.1:4000", nil)
+	//go http.ListenAndServe("127.0.0.1:4000", nil)
+
+	ef, err = os.Create(*errorFile)
+	if err != nil {
+		panic(err)
+	}
+	defer ef.Close()
 
 	flag.Parse()
 
@@ -62,7 +69,7 @@ func main() {
 	}
 
 	wg.Add(*rcount)
-	wgNet.Add(*rcount)
+	wgNet.Add(*ocount)
 	for i := 0; i < *rcount; i++ {
 		go handleTextChan(textChan, recordChan)
 	}
@@ -127,7 +134,7 @@ func handleTextChan(textChan chan string, recordChan chan []byte) {
 		// Get to work
 		matches := re.FindStringSubmatch(s)
 		if matches == nil || len(matches) != 4 {
-			log.Printf("error parsing:%s", s)
+			ef.Write([]byte(s + "\n"))
 			continue
 		}
 		j, err := json.Marshal(record{
