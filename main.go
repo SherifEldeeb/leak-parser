@@ -1,22 +1,19 @@
 package main
 
 import (
-	"bufio"
-	"encoding/json"
 	"errors"
 	"flag"
-	"fmt"
 	"log"
-	"net"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sync"
 	"time"
+
+	"github.com/SherifEldeeb/SherifEldeeb/leak-parser/leakparser"
 	//_ "net/http/pprof"
 )
 
-type record struct {
+type Record struct {
 	// Full string
 	U string
 	H string
@@ -34,22 +31,14 @@ var (
 	port     = flag.String("port", "4445", "Logstash server port")
 )
 
+var ef *os.File
+var err error
+
 func c(err error) {
 	if err != nil {
 		log.Fatal("Error:", err)
 	}
 }
-
-var recordChan = make(chan []byte)
-var textChan = make(chan string)
-var counterChan = make(chan bool)
-var ticker = time.Tick(time.Second)
-var errorCounter = 0
-
-var wg = &sync.WaitGroup{}
-var wgNet = &sync.WaitGroup{}
-var ef *os.File
-var err error
 
 func main() {
 	//go http.ListenAndServe("127.0.0.1:4000", nil)
@@ -71,7 +60,7 @@ func main() {
 	wg.Add(*rcount)
 	wgNet.Add(*ocount)
 	for i := 0; i < *rcount; i++ {
-		go handleTextChan(textChan, recordChan)
+		go leakparser.HandleTextChan(textChan, recordChan)
 	}
 	go progress(counterChan)
 
@@ -108,82 +97,4 @@ func main() {
 	close(recordChan)
 	wgNet.Wait()
 	close(counterChan)
-}
-
-func handle(file string, textChan chan string) error {
-	log.Println("Parsing:", file)
-	f, err := os.Open(file)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-
-	for scanner.Scan() {
-		textChan <- scanner.Text()
-	}
-	return nil
-	///////////////
-}
-
-func handleTextChan(textChan chan string, recordChan chan []byte) {
-	defer wg.Done()
-	re := regexp.MustCompile("(?P<u>[^@:;,]+)@(?P<h>[^:;]+)[;:,](?P<p>.+)")
-	for s := range textChan {
-		// Get to work
-		matches := re.FindStringSubmatch(s)
-		if matches == nil || len(matches) != 4 {
-			ef.Write([]byte(s + "\n"))
-			continue
-		}
-		j, err := json.Marshal(record{
-			matches[1],
-			matches[2],
-			matches[3],
-		})
-		if err != nil {
-			log.Printf("error Marshaling:%v", s)
-			continue
-		}
-		recordChan <- j
-	}
-}
-
-func sendRecords(ch chan []byte) error {
-	defer wgNet.Done()
-	// TCP
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", *logstash, *port))
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	for j := range ch {
-		_, err = conn.Write(j)
-		if err != nil {
-			return err
-		}
-		_, err = conn.Write([]byte{'\n'})
-		if err != nil {
-			return err
-		}
-		counterChan <- true
-		//fmt.Print(".")
-	}
-	return nil
-}
-
-func progress(counter chan bool) {
-	var c uint64
-
-	go func() {
-		for <-counter {
-			c++
-		}
-	}()
-
-	for t := range ticker {
-		_ = t
-		log.Printf("Count: %d", c)
-	}
 }
