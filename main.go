@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/SherifEldeeb/SherifEldeeb/leak-parser/leakparser"
+	"./leakparser"
 	//_ "net/http/pprof"
 )
 
