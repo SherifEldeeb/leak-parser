@@ -2,12 +2,10 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -42,7 +40,7 @@ func c(err error) {
 	}
 }
 
-var recordChan = make(chan []byte)
+var recordChan = make(chan string)
 var textChan = make(chan string)
 var counterChan = make(chan bool)
 var ticker = time.Tick(time.Second)
@@ -80,7 +78,7 @@ func main() {
 	for i := 0; i < *ocount; i++ {
 		go func() {
 			for {
-				err := sendRecords(recordChan)
+				err := sendRedis(recordChan)
 				if err != nil {
 					errorCounter++
 					if errorCounter > 3 {
@@ -129,7 +127,7 @@ func handle(file string, textChan chan string) error {
 	///////////////
 }
 
-func handleTextChan(textChan chan string, recordChan chan []byte) {
+func handleTextChan(textChan chan string, recordChan chan string) {
 	defer wg.Done()
 	re := regexp.MustCompile("(?P<u>[^@:;,]+)@(?P<h>[^:;]+)[;:,](?P<p>.+)")
 	for s := range textChan {
@@ -139,35 +137,22 @@ func handleTextChan(textChan chan string, recordChan chan []byte) {
 			ef.Write([]byte(s + "\n"))
 			continue
 		}
-		j, err := json.Marshal(record{
-			matches[1],
-			matches[2],
-			matches[3],
-		})
-		if err != nil {
-			log.Printf("error Marshaling:%v", s)
-			continue
-		}
-		recordChan <- j
+		recordChan <- matches[1] + "\t" + matches[2] + "\t" + matches[3]
 	}
 }
 
-func sendRecords(ch chan []byte) error {
+func sendRedis(ch chan string) error {
 	defer wgNet.Done()
-	// TCP
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", *logstash, *port))
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
+	client := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
 	for j := range ch {
-		_, err = conn.Write(j)
+		err := client.SAdd("l", j).Err()
 		if err != nil {
-			return err
-		}
-		_, err = conn.Write([]byte{'\n'})
-		if err != nil {
-			return err
+			panic(err)
 		}
 		counterChan <- true
 		//fmt.Print(".")
